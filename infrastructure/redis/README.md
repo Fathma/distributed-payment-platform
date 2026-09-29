@@ -1,0 +1,3 @@
+# Redis
+
+Local Redis configuration.
