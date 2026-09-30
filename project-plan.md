@@ -11,10 +11,10 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 2: Make the project runnable
 
-5. **Establish the TypeScript monorepo.** Set up workspace scripts, TypeScript configuration, NestJS service scaffolds, shared types, configuration, and structured logging. Add local commands for building and running each service.
-6. **Add local infrastructure.** Configure Docker Compose for PostgreSQL, Redis, Kafka, Prometheus, and Grafana, with service health checks and persistent development data where appropriate.
-7. **Add database migrations and ownership boundaries.** Create separate order and payment schemas or databases. Add migrations for orders, payments, and idempotency records. Keep each service responsible for its own data.
-8. **Implement health and readiness endpoints.** Each service should expose liveness and readiness checks. Readiness should report the dependencies that service actually needs.
+5. [x] **Establish the TypeScript monorepo.** Set up workspace scripts, TypeScript configuration, NestJS service scaffolds, shared types, configuration, and structured logging. Add local commands and Docker images for building and running each service.
+6. [x] **Add local infrastructure.** Configure Docker Compose for PostgreSQL, Redis, Kafka, Prometheus, Grafana, and the four app containers, with service health checks and persistent development data where appropriate.
+7. [x] **Add database migrations and ownership boundaries.** Create separate order and payment schemas or databases. Add migrations for orders, payments, and idempotency records. Keep each service responsible for its own data.
+8. [x] **Implement health and readiness endpoints.** Each service should expose liveness and readiness checks. Readiness should report the dependencies that service actually needs.
 
 ## Phase 3: Build the end-to-end payment flow
 
