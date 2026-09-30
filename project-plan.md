@@ -4,10 +4,10 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 1: Define the system
 
-1. **Confirm the service boundaries and request flow.** Write down which service owns each API, database, and event. The gateway handles client traffic; Order Service owns orders; Payment Service owns payments and idempotency; Payment Worker handles provider calls.
-2. **Define shared contracts.** Specify the API request/response shapes, order and payment state transitions, and versioned Kafka event schemas. Include correlation IDs and stable message keys, such as `paymentId`.
-3. **Decide the payment consistency strategy.** Document how order creation, payment creation, and event publication stay consistent when a process or dependency fails. Choose a transaction-outbox approach or explicitly document another approach and its failure modes.
-4. **Write architecture documentation.** Add a system diagram, service responsibilities, data ownership, and the initial choices for retries, idempotency, rate limiting, and failure handling. Update it as implementation decisions become real.
+1. [x] **Confirm the service boundaries and request flow.** Write down which service owns each API, database, and event. The gateway handles client traffic; Order Service owns orders; Payment Service owns payments and idempotency; Payment Worker handles provider calls. See [architecture](docs/architecture.md).
+2. [x] **Define shared contracts.** Specify the API request/response shapes, order and payment state transitions, and versioned Kafka event schemas. Include correlation IDs and stable message keys, such as `paymentId`. See [contracts](docs/contracts.md).
+3. [x] **Decide the payment consistency strategy.** Document how order creation, payment creation, and event publication stay consistent when a process or dependency fails. Choose a transaction-outbox approach or explicitly document another approach and its failure modes. PayFlow uses transactional outboxes, at-least-once delivery, idempotent consumers, and provider idempotency.
+4. [x] **Write architecture documentation.** Add a system diagram, service responsibilities, data ownership, and the initial choices for retries, idempotency, rate limiting, and failure handling. Update it as implementation decisions become real.
 
 ## Phase 2: Make the project runnable
 
