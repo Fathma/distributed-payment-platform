@@ -4,7 +4,7 @@ These contracts define the first implementation slice. JSON fields are camelCase
 
 ## Public API
 
-All endpoints are exposed through the API Gateway. Protected endpoints use `Authorization: Bearer <JWT>`. The gateway generates `X-Request-Id` when absent and propagates `X-Correlation-Id`; if absent, it initializes the correlation ID from the request ID. Internal service calls and events preserve both values.
+All endpoints are exposed through the API Gateway. The target contract uses `Authorization: Bearer <JWT>`. JWT validation and role enforcement are scheduled for Phase 5; the current Phase 3 gateway accepts `x-user-id` or defaults to `usr_dev` for local walkthroughs. That development identity is not authentication and must not be exposed outside local development. The gateway generates `X-Request-Id` when absent and propagates `X-Correlation-Id`; if absent, it initializes the correlation ID from the request ID. Internal service calls and events preserve both values.
 
 ### Authentication
 

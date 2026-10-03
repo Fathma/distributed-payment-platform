@@ -18,12 +18,12 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 3: Build the end-to-end payment flow
 
-9. **Create the Order Service API.** Implement order creation and retrieval, validate items and amounts, and persist orders in the `PENDING_PAYMENT` state.
-10. **Create the Payment Service API and data model.** Create payment records, associate them with orders, and implement payment status retrieval and state transitions.
-11. **Add the mock payment provider.** Make it configurable to return success, timeout, rate limit, network error, or server error so that failure paths can be exercised predictably.
-12. **Publish payment requests and consume them in the worker.** Use a versioned `payment.requested` event, a stable payment ID as the message key, and a consumer group. The worker should call the mock provider and publish a success or failure result.
-13. **Connect payment results back to orders.** Consume result events and update order status. Define what happens when events arrive late, more than once, or out of order.
-14. **Run the first vertical-slice walkthrough.** Demonstrate order creation, asynchronous payment processing, and status retrieval. This establishes the core path before adding resilience features.
+9. [x] **Create the Order Service API.** Implement order creation and retrieval, validate items and amounts, and persist orders in the `PENDING_PAYMENT` state. Order writes and `order.created` outbox rows commit together.
+10. [x] **Create the Payment Service API and data model.** Consume order events, create one payment per order, expose payment status retrieval, and apply payment state transitions with an outbox.
+11. [x] **Add the mock payment provider.** Configure success, timeout, rate limit, network error, server error, decline, and random success-rate modes.
+12. [x] **Publish payment requests and consume them in the worker.** Use versioned `payment.requested` events keyed by payment ID and a worker consumer group. The worker calls the mock provider and publishes a completion or failure result.
+13. [x] **Connect payment results back to orders.** Payment Service consumes worker results, writes normalized outcome events, and Order Service updates order status.
+14. [x] **Run the first vertical-slice walkthrough.** Verified a gateway order request returned `202`, then the order reached `PAID` and the matching payment reached `SUCCESS` with a provider reference.
 
 ## Phase 4: Protect against duplicate work and failures
 

@@ -1,6 +1,7 @@
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
   id TEXT PRIMARY KEY,
   order_id TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL,
   amount BIGINT NOT NULL CHECK (amount > 0),
   currency CHAR(3) NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('PENDING', 'PROCESSING', 'SUCCESS', 'FAILED')),
@@ -11,9 +12,9 @@ CREATE TABLE payments (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX payments_status_updated_idx ON payments (status, updated_at);
+CREATE INDEX IF NOT EXISTS payments_status_updated_idx ON payments (status, updated_at);
 
-CREATE TABLE idempotency_keys (
+CREATE TABLE IF NOT EXISTS idempotency_keys (
   user_id TEXT NOT NULL,
   key TEXT NOT NULL,
   request_hash TEXT NOT NULL,
@@ -23,7 +24,7 @@ CREATE TABLE idempotency_keys (
   PRIMARY KEY (user_id, key)
 );
 
-CREATE TABLE payment_outbox (
+CREATE TABLE IF NOT EXISTS payment_outbox (
   event_id TEXT PRIMARY KEY,
   aggregate_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
@@ -33,9 +34,9 @@ CREATE TABLE payment_outbox (
   published_at TIMESTAMPTZ
 );
 
-CREATE INDEX payment_outbox_unpublished_idx ON payment_outbox (created_at) WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS payment_outbox_unpublished_idx ON payment_outbox (created_at) WHERE published_at IS NULL;
 
-CREATE TABLE payment_inbox (
+CREATE TABLE IF NOT EXISTS payment_inbox (
   event_id TEXT PRIMARY KEY,
   processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

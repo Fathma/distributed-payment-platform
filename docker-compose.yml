@@ -84,7 +84,24 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.requested --partitions 6 --replication-factor 1 &&
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.completed --partitions 6 --replication-factor 1 &&
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.failed --partitions 6 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.succeeded --partitions 6 --replication-factor 1 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.declined --partitions 6 --replication-factor 1 &&
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists --topic payment.dlq --partitions 6 --replication-factor 1
+    restart: 'no'
+
+  migrate-databases:
+    image: payflow-postgres
+    build:
+      context: .
+      dockerfile: infrastructure/postgres/Dockerfile
+    entrypoint: ['/bin/sh', '-ec']
+    command:
+      - >-
+        PGPASSWORD=order_dev_password psql -h postgres -U order_app -d order_db -v ON_ERROR_STOP=1 -f /migrations/order/001_initial.sql &&
+        PGPASSWORD=payment_dev_password psql -h postgres -U payment_app -d payment_db -v ON_ERROR_STOP=1 -f /migrations/payment/001_initial.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: 'no'
 
   prometheus:
@@ -123,6 +140,8 @@ services:
     environment:
       PORT: 3000
       REDIS_URL: redis://redis:6379
+      ORDER_SERVICE_URL: http://order-service:3001
+      PAYMENT_SERVICE_URL: http://payment-service:3002
     depends_on:
       redis:
         condition: service_healthy
@@ -130,6 +149,7 @@ services:
         condition: service_healthy
       payment-service:
         condition: service_healthy
+    restart: unless-stopped
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -149,10 +169,11 @@ services:
       ORDER_DATABASE_URL: postgresql://order_app:order_dev_password@postgres:5432/order_db
       KAFKA_BROKERS: kafka:19092
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-databases:
+        condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
+    restart: unless-stopped
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -172,10 +193,11 @@ services:
       PAYMENT_DATABASE_URL: postgresql://payment_app:payment_dev_password@postgres:5432/payment_db
       KAFKA_BROKERS: kafka:19092
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-databases:
+        condition: service_completed_successfully
       kafka-init:
         condition: service_completed_successfully
+    restart: unless-stopped
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3002/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
@@ -193,9 +215,13 @@ services:
     environment:
       PORT: 3003
       KAFKA_BROKERS: kafka:19092
+      MOCK_PROVIDER_MODE: ${MOCK_PROVIDER_MODE:-success}
+      MOCK_PROVIDER_SUCCESS_RATE: ${MOCK_PROVIDER_SUCCESS_RATE:-0.9}
+      MOCK_PROVIDER_TIMEOUT_MS: ${MOCK_PROVIDER_TIMEOUT_MS:-1500}
     depends_on:
       kafka-init:
         condition: service_completed_successfully
+    restart: unless-stopped
     healthcheck:
       test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3003/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s

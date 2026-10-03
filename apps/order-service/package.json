@@ -2,7 +2,7 @@
   "name": "@payflow/order-service",
   "version": "0.1.0",
   "private": true,
-  "scripts": { "build": "nest build", "typecheck": "tsc --noEmit", "start": "nest start", "start:dev": "nest start --watch", "db:migrate": "psql \"${ORDER_DATABASE_URL:-postgresql://order_app:order_dev_password@localhost:5432/order_db}\" -v ON_ERROR_STOP=1 -f migrations/001_initial.sql" },
-  "dependencies": { "@nestjs/common": "^11.0.0", "@nestjs/core": "^11.0.0", "@nestjs/platform-express": "^11.0.0", "@payflow/config": "*", "@payflow/logger": "*", "kafkajs": "^2.2.4", "pg": "^8.13.0", "reflect-metadata": "^0.2.2", "rxjs": "^7.8.0" },
+  "scripts": { "build": "nest build", "typecheck": "tsc --noEmit", "start": "nest start", "start:dev": "nest start --watch", "db:migrate": "docker compose -f ../../docker-compose.yml exec -T postgres psql -U order_app -d order_db -v ON_ERROR_STOP=1 < migrations/001_initial.sql" },
+  "dependencies": { "@nestjs/common": "^11.0.0", "@nestjs/core": "^11.0.0", "@nestjs/platform-express": "^11.0.0", "@payflow/config": "*", "@payflow/logger": "*", "@payflow/shared-types": "*", "kafkajs": "^2.2.4", "pg": "^8.13.0", "reflect-metadata": "^0.2.2", "rxjs": "^7.8.0" },
   "devDependencies": { "@types/pg": "^8.11.0" }
 }

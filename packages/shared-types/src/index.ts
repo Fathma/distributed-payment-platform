@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export type OrderStatus = 'PENDING_PAYMENT' | 'PAYMENT_PROCESSING' | 'PAID' | 'PAYMENT_FAILED' | 'CANCELLED';
 export type PaymentStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
 export type UserRole = 'CUSTOMER' | 'ADMIN';
@@ -12,6 +14,28 @@ export interface EventEnvelope<TType extends string, TData> {
   requestId: string;
   aggregateId: string;
   data: TData;
+}
+
+export function createEventEnvelope<TType extends string, TData>(input: {
+  eventType: TType;
+  producer: string;
+  aggregateId: string;
+  data: TData;
+  requestId?: string;
+  correlationId?: string;
+}): EventEnvelope<TType, TData> {
+  const requestId = input.requestId ?? randomUUID();
+  return {
+    eventId: randomUUID(),
+    eventType: input.eventType,
+    schemaVersion: 1,
+    occurredAt: new Date().toISOString(),
+    producer: input.producer,
+    correlationId: input.correlationId ?? requestId,
+    requestId,
+    aggregateId: input.aggregateId,
+    data: input.data,
+  };
 }
 
 export interface OrderCreatedData {

@@ -1,4 +1,4 @@
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   items JSONB NOT NULL,
@@ -10,9 +10,9 @@ CREATE TABLE orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX orders_user_created_idx ON orders (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS orders_user_created_idx ON orders (user_id, created_at DESC);
 
-CREATE TABLE order_idempotency_keys (
+CREATE TABLE IF NOT EXISTS order_idempotency_keys (
   user_id TEXT NOT NULL,
   key TEXT NOT NULL,
   request_hash TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE order_idempotency_keys (
   PRIMARY KEY (user_id, key)
 );
 
-CREATE TABLE order_outbox (
+CREATE TABLE IF NOT EXISTS order_outbox (
   event_id TEXT PRIMARY KEY,
   aggregate_id TEXT NOT NULL,
   event_type TEXT NOT NULL,
@@ -32,9 +32,9 @@ CREATE TABLE order_outbox (
   published_at TIMESTAMPTZ
 );
 
-CREATE INDEX order_outbox_unpublished_idx ON order_outbox (created_at) WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS order_outbox_unpublished_idx ON order_outbox (created_at) WHERE published_at IS NULL;
 
-CREATE TABLE order_inbox (
+CREATE TABLE IF NOT EXISTS order_inbox (
   event_id TEXT PRIMARY KEY,
   processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

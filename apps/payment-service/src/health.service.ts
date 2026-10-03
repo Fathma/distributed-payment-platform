@@ -2,12 +2,15 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Kafka } from 'kafkajs';
 import { Pool } from 'pg';
 import { loadConfig } from '@payflow/config';
+import { log } from '@payflow/logger';
 
 @Injectable()
 export class HealthService implements OnModuleDestroy {
   private readonly config = loadConfig();
   private readonly pool = new Pool({ connectionString: this.config.paymentDatabaseUrl, connectionTimeoutMillis: 1500, max: 1 });
   private readonly kafka = new Kafka({ clientId: 'payment-service-health', brokers: this.config.kafkaBrokers, connectionTimeout: 1500, requestTimeout: 2000, retry: { retries: 0 } });
+
+  constructor() { this.pool.on('error', (error) => log('error', 'Idle payment database health connection failed', { service: 'payment-service', error: error.message })); }
 
   async check() {
     const dependencies: Record<string, 'ok' | 'unavailable'> = { postgres: 'unavailable', kafka: 'unavailable' };
