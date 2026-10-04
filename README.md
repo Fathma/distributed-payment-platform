@@ -37,6 +37,8 @@ Requirements: Node.js 22+, npm 10+, and Docker Compose.
 
 The gateway exposes `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id`, and `GET /api/payments/:id`. Submit an order with an `Idempotency-Key` header; it returns `202` while Kafka processing continues. The mock provider mode can be set in `.env` with `MOCK_PROVIDER_MODE=success`, `timeout`, `server_error`, `rate_limit`, `network_error`, `decline`, or `random`. For the current development-only identity, send `x-user-id: usr_dev` (or another stable test user ID); JWT auth is Phase 5.
 
+Interactive OpenAPI documentation is available at `http://localhost:3000/api/docs`; the generated JSON document is at `http://localhost:3000/api/docs-json`. It describes the public gateway routes, request headers, order body, and common responses.
+
 To run apps directly on the host, first run `npm install`, start infrastructure, apply migrations with `npm run db:migrate --workspace @payflow/order-service` and `npm run db:migrate --workspace @payflow/payment-service`, then use `npm run start:gateway`, `npm run start:order`, `npm run start:payment`, and `npm run start:worker`. Stop only the app containers with `npm run apps:down`; stop the whole stack with `npm run infra:down`.
 
 ## Technology direction

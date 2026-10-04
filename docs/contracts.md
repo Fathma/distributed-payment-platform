@@ -2,6 +2,8 @@
 
 These contracts define the first implementation slice. JSON fields are camelCase. Timestamps use RFC 3339 UTC; money is an integer in the currency's minor unit (for BDT, poisha) to avoid floating-point arithmetic. Unknown fields may be rejected at public API boundaries. Event schemas are versioned independently from service deployments.
 
+The interactive OpenAPI UI for public gateway routes is served at `/api/docs`; its generated JSON document is at `/api/docs-json`.
+
 ## Public API
 
 All endpoints are exposed through the API Gateway. The target contract uses `Authorization: Bearer <JWT>`. JWT validation and role enforcement are scheduled for Phase 5; the current Phase 3 gateway accepts `x-user-id` or defaults to `usr_dev` for local walkthroughs. That development identity is not authentication and must not be exposed outside local development. The gateway generates `X-Request-Id` when absent and propagates `X-Correlation-Id`; if absent, it initializes the correlation ID from the request ID. Internal service calls and events preserve both values.
