@@ -13,6 +13,7 @@
     "start:payment": "npm run start:dev --workspace @payflow/payment-service",
     "start:worker": "npm run start:dev --workspace @payflow/payment-worker",
     "infra:up": "docker compose up -d postgres redis kafka kafka-init prometheus grafana",
+    "db:migrate": "docker compose run --rm migrate-databases",
     "apps:up": "docker compose up -d --build api-gateway order-service payment-service payment-worker",
     "apps:down": "docker compose stop api-gateway order-service payment-service payment-worker",
     "infra:down": "docker compose down"

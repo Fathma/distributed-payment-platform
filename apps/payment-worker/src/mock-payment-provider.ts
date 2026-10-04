@@ -1,5 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
+import { loadConfig } from '@payflow/config';
 
 export class ProviderError extends Error {
   constructor(readonly code: string, message: string) { super(message); }
@@ -15,12 +17,19 @@ export interface ProviderCharge {
 export interface ProviderResult { providerReference: string }
 
 @Injectable()
-export class MockPaymentProvider {
-  private readonly outcomes = new Map<string, ProviderResult>();
+export class MockPaymentProvider implements OnModuleDestroy {
+  private readonly pool = new Pool({ connectionString: loadConfig().workerDatabaseUrl });
 
   async charge(charge: ProviderCharge): Promise<ProviderResult> {
-    const previous = this.outcomes.get(charge.idempotencyKey);
-    if (previous) return previous;
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [charge.idempotencyKey]);
+      const previous = await client.query<{ provider_reference: string }>('SELECT provider_reference FROM provider_outcomes WHERE idempotency_key = $1', [charge.idempotencyKey]);
+      if (previous.rowCount) {
+        await client.query('COMMIT');
+        return { providerReference: previous.rows[0].provider_reference };
+      }
 
     const configuredMode = (process.env.MOCK_PROVIDER_MODE ?? 'success').toLowerCase();
     let mode = configuredMode;
@@ -41,8 +50,15 @@ export class MockPaymentProvider {
     if (mode === 'decline') throw new ProviderError('PROVIDER_DECLINED', 'Mock provider declined the payment');
     if (mode !== 'success') throw new Error(`Unsupported MOCK_PROVIDER_MODE: ${configuredMode}`);
 
-    const result = { providerReference: `mock_tx_${randomUUID()}` };
-    this.outcomes.set(charge.idempotencyKey, result);
-    return result;
+      const result = { providerReference: `mock_tx_${randomUUID()}` };
+      await client.query('INSERT INTO provider_outcomes (idempotency_key, provider_reference) VALUES ($1, $2)', [charge.idempotencyKey, result.providerReference]);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally { client.release(); }
   }
+
+  async onModuleDestroy() { await this.pool.end(); }
 }

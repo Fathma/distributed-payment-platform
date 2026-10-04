@@ -54,15 +54,14 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      const previous = await client.query<{ request_hash: string; order_id: string }>(
-        'SELECT request_hash, order_id FROM order_idempotency_keys WHERE user_id = $1 AND key = $2 AND expires_at > now()',
+      const previous = await client.query<{ request_hash: string; response: ReturnType<OrdersService['toOrder']> }>(
+        'SELECT request_hash, response FROM order_idempotency_keys WHERE user_id = $1 AND key = $2 AND expires_at > now()',
         [userId, idempotencyKey],
       );
       if (previous.rowCount) {
         if (previous.rows[0].request_hash !== requestHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_CONFLICT', message: 'Idempotency key was used with a different request' });
-        const existing = await this.getOrderRow(client, previous.rows[0].order_id, userId);
         await client.query('COMMIT');
-        return this.toOrder(existing);
+        return previous.rows[0].response;
       }
 
       const orderId = `ord_${randomUUID()}`;
@@ -76,19 +75,20 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         [orderId, userId, JSON.stringify(items), totalAmount, currency],
       );
       await client.query(
-        `INSERT INTO order_idempotency_keys (user_id, key, request_hash, order_id, expires_at)
-         VALUES ($1, $2, $3, $4, now() + interval '24 hours')`,
-        [userId, idempotencyKey, requestHash, orderId],
-      );
-      await client.query(
         `INSERT INTO order_outbox (event_id, aggregate_id, event_type, schema_version, payload)
          VALUES ($1, $2, $3, $4, $5::jsonb)`,
         [event.eventId, orderId, event.eventType, event.schemaVersion, JSON.stringify(event)],
       );
       const created = await this.getOrderRow(client, orderId, userId);
+      const response = this.toOrder(created);
+      await client.query(
+        `INSERT INTO order_idempotency_keys (user_id, key, request_hash, order_id, response, expires_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, now() + interval '24 hours')`,
+        [userId, idempotencyKey, requestHash, orderId, JSON.stringify(response)],
+      );
       await client.query('COMMIT');
       log('info', 'Order created', { service: 'order-service', requestId: event.requestId, correlationId: event.correlationId, orderId });
-      return this.toOrder(created);
+      return response;
     } catch (error) {
       await client.query('ROLLBACK').catch(() => undefined);
       throw error;

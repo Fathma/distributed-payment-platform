@@ -50,7 +50,7 @@ The payment ID may initially be null because payment creation is asynchronous. T
 - `GET /api/orders` — customer sees only their own orders; supports `cursor` and bounded `limit`.
 - `POST /api/orders/:id/cancel` — customer may cancel only before processing begins; response contains the current order state.
 
-Repeating a create request with the same user, key, and request body returns the original order result. Reusing a key with a different body returns `409 IDEMPOTENCY_KEY_CONFLICT`. Order creation idempotency is stored with the order in the Order Service; payment creation is separately constrained to one payment per `orderId`.
+Repeating a create request with the same user, key, and request body returns the original order response snapshot. Reusing a key with a different body returns `409 IDEMPOTENCY_KEY_CONFLICT`. This order request starts the event-driven payment creation flow; payment creation is separately constrained to one payment per `orderId`.
 
 ### Payments
 
@@ -62,7 +62,7 @@ Initial payment creation is event-driven from `order.created`, not a public `POS
 ### Admin DLQ
 
 - `GET /api/admin/dlq` — admin only; paginated list of dead-letter records with safe error summaries.
-- `POST /api/admin/dlq/:id/reprocess` — admin only; requeues the original logical payment request and records the actor. Reprocessing must preserve the original payment/provider idempotency identity.
+- `GET /admin/dlq` and `POST /admin/dlq/:id/reprocess` on the worker's internal port — protected by the configured `X-Admin-Token`; `X-Admin-Id` records the operator. Reprocessing requeues the original logical payment request and preserves the original payment/provider idempotency identity. Gateway JWT role enforcement is Phase 5.
 
 ### Errors
 

@@ -17,10 +17,19 @@ CREATE TABLE IF NOT EXISTS order_idempotency_keys (
   key TEXT NOT NULL,
   request_hash TEXT NOT NULL,
   order_id TEXT NOT NULL REFERENCES orders(id),
+  response JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (user_id, key)
 );
+
+ALTER TABLE order_idempotency_keys ADD COLUMN IF NOT EXISTS response JSONB;
+UPDATE order_idempotency_keys k SET response = jsonb_build_object(
+  'id', o.id, 'userId', o.user_id, 'items', o.items, 'totalAmount', o.total_amount,
+  'currency', trim(o.currency), 'status', o.status, 'paymentId', o.payment_id,
+  'createdAt', o.created_at, 'updatedAt', o.updated_at
+) FROM orders o WHERE o.id = k.order_id AND k.response IS NULL;
+ALTER TABLE order_idempotency_keys ALTER COLUMN response SET NOT NULL;
 
 CREATE TABLE IF NOT EXISTS order_outbox (
   event_id TEXT PRIMARY KEY,

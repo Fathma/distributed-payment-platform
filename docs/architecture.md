@@ -35,8 +35,8 @@ flowchart LR
 | API Gateway | Public HTTP surface; no business data | JWT authentication and role checks, validation, rate limiting, request/correlation IDs, routing, structured access logs |
 | Order Service | Orders and order outbox | Create/list/get/cancel orders; enforce order state transitions; publish `order.created`; consume payment outcomes and update order state |
 | Payment Service | Payments, client idempotency records, payment outbox | Create one payment per order, return payment state, enforce payment transitions, publish `payment.requested`, consume worker results |
-| Payment Worker | No authoritative business database | Consume payment requests, call provider with a stable idempotency key, retry transient failures, route exhausted work to DLQ, publish results |
-| Mock Provider | Simulated provider configuration and call behavior | Deterministically or probabilistically simulate success, timeout, 5xx, rate-limit, and network failures; deduplicate calls by provider idempotency key |
+| Payment Worker | Operational job and DLQ records (not payment business state) | Persist requests before acknowledging Kafka, call provider with a stable idempotency key, retry transient failures, route exhausted work to DLQ, publish results |
+| Mock Provider | Durable simulated provider outcomes in worker PostgreSQL | Simulate success, timeout, 5xx, rate-limit, and network failures; return the same successful outcome for the same provider idempotency key across worker restarts |
 | Redis | Disposable cache and rate-limit state | Gateway rate limiting and read-through cache. Cache loss is recoverable; database remains authoritative. |
 
 Order and payment data use separate PostgreSQL schemas/databases and credentials. A service must not query another service's tables; information crosses service boundaries through HTTP APIs or Kafka events. The worker has no direct access to payment tables.
@@ -55,8 +55,8 @@ Use a transactional outbox in each producer that also writes business data:
 
 1. Order Service commits the order and its `order.created` outbox row in one PostgreSQL transaction.
 2. Payment Service consumes `order.created`, then commits a payment row (unique by `order_id`) and its `payment.requested` outbox row together.
-3. The worker calls the provider using `paymentId` as the provider idempotency key. The mock provider persists the first outcome for that key and returns the same outcome for repeats.
-4. The worker publishes a result event before committing/acknowledging its input offset. If it crashes between publishing and offset commit, the request may be repeated; provider idempotency prevents another business charge, and consumers deduplicate by event/payment identity.
+3. The worker stores each request as a durable job before committing its Kafka offset. It calls the provider using `paymentId` as the provider idempotency key. The mock provider stores the first successful outcome durably and returns the same outcome for repeats.
+4. The worker publishes a result before marking the job complete. A crash can cause the result to be published again; the provider idempotency key prevents a second business charge, and downstream consumers apply idempotent state updates.
 5. Payment Service commits the payment state update and a result/outbox record atomically where it emits a normalized outcome. Order Service consumes the outcome and applies it idempotently.
 
 Outbox relays publish pending rows and mark them published only after broker acknowledgement. A crash may republish a row, so consumers keep an inbox/processed-event record or use an equivalent unique business constraint in the same transaction as their state change. Events are keyed by `orderId` or `paymentId` to preserve per-entity partition ordering. No service acknowledges a consumed event before its database transaction commits.
@@ -85,8 +85,8 @@ The provider timeout case is inherently ambiguous: the provider may have charged
 | --- | --- |
 | Worker stops | Kafka retains unacknowledged requests; a replacement worker resumes consumption. |
 | Provider transient failure | Retry with bounded exponential backoff and jitter; route exhausted events to DLQ. |
-| PostgreSQL unavailable | Do not acknowledge events whose state transaction failed; return a service error for affected HTTP operations and recover when DB returns. |
-| Redis unavailable | Protected writes are rejected according to fail-closed rate-limit policy; cache reads bypass Redis and use PostgreSQL. |
+| PostgreSQL unavailable | Do not acknowledge Kafka input before its durable job/inbox write; affected HTTP operations return an error, readiness fails, and processing resumes when PostgreSQL returns. |
+| Redis unavailable | Gateway readiness fails. No current order/payment operation depends on Redis; when rate limiting is added, protected writes fail closed, and cache reads fall back to PostgreSQL. |
 | Duplicate Kafka event | Inbox/unique constraints and provider idempotency prevent repeated state effects and charges. |
 | Ambiguous provider timeout | Repeat only with the same provider idempotency key; otherwise require reconciliation rather than issuing a fresh charge. |
 

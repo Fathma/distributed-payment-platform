@@ -27,11 +27,11 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 4: Protect against duplicate work and failures
 
-15. **Implement API idempotency.** Require an idempotency key for payment creation. Store the key, request hash, and response so repeated matching requests return the existing result; define how conflicting reuse is handled.
-16. **Make worker processing safe to repeat.** Record payment processing outcomes so redelivered Kafka messages cannot cause a second business charge. Handle the case where the provider succeeds but the worker crashes before acknowledging the message.
-17. **Add bounded retries with backoff and jitter.** Classify retryable and permanent failures, limit attempts, and make retry delays observable. Avoid indefinite retries.
-18. **Add a dead-letter queue and reprocessing mechanism.** Preserve the original event, error details, attempt count, timestamp, and service name. Provide an admin-only way to inspect and reprocess DLQ messages safely.
-19. **Define dependency outage behavior.** Document and implement how services behave during PostgreSQL, Redis, Kafka, and provider outages. For example, decide whether rate limiting fails open or closed and whether cache failures fall back to the database.
+15. [x] **Implement API idempotency.** The order request that starts payment creation requires a key; the Order Service stores its request hash and original response snapshot. Conflicting reuse returns `409`, and one payment per order is enforced by a database uniqueness constraint.
+16. [x] **Make worker processing safe to repeat.** Persist worker jobs before acknowledging Kafka, and persist successful mock-provider outcomes by the stable payment idempotency key so restarts/re-delivery cannot charge twice.
+17. [x] **Add bounded retries with backoff and jitter.** Retry transient provider failures up to a configurable limit with persisted exponential delays and jitter; declines are permanent.
+18. [x] **Add a dead-letter queue and reprocessing mechanism.** Persist full original events and failure metadata, publish `payment.dlq`, and provide token-protected worker endpoints to inspect/reprocess while preserving payment/provider identity.
+19. [x] **Define dependency outage behavior.** Document PostgreSQL, Redis, Kafka, and provider policies; readiness exposes required dependencies, database/broker write failures prevent acknowledgement, and retries resume from durable state.
 
 ## Phase 5: Secure and expose the APIs
 
