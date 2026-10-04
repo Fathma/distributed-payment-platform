@@ -26,13 +26,25 @@ export class MockPaymentProvider implements OnModuleDestroy {
       await client.query('BEGIN');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [charge.idempotencyKey]);
       const previous = await client.query<{ provider_reference: string }>('SELECT provider_reference FROM provider_outcomes WHERE idempotency_key = $1', [charge.idempotencyKey]);
-      if (previous.rowCount) {
+    if (previous.rowCount) {
         await client.query('COMMIT');
         return { providerReference: previous.rows[0].provider_reference };
       }
 
     const configuredMode = (process.env.MOCK_PROVIDER_MODE ?? 'success').toLowerCase();
     let mode = configuredMode;
+    if (mode === 'transient_then_success') {
+      const attempts = await client.query<{ attempts: number }>(
+        `INSERT INTO provider_attempts (idempotency_key, attempts) VALUES ($1, 1)
+         ON CONFLICT (idempotency_key) DO UPDATE SET attempts = provider_attempts.attempts + 1, updated_at = now()
+         RETURNING attempts`, [charge.idempotencyKey],
+      );
+      if (attempts.rows[0].attempts === 1) {
+        await client.query('COMMIT');
+        throw new ProviderError('PROVIDER_5XX', 'Mock provider returned one transient server error');
+      }
+      mode = 'success';
+    }
     if (mode === 'random') {
       const successRate = Number(process.env.MOCK_PROVIDER_SUCCESS_RATE ?? '0.9');
       if (!Number.isFinite(successRate) || successRate < 0 || successRate > 1) throw new Error('MOCK_PROVIDER_SUCCESS_RATE must be between 0 and 1');

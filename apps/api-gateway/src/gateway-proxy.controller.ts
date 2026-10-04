@@ -121,7 +121,8 @@ export class GatewayProxyController {
     if (contentType) headers['content-type'] = contentType;
     const method = request.method.toUpperCase();
     const body = method === 'GET' || method === 'HEAD' ? undefined : JSON.stringify(request.body ?? {});
-    const cacheKey = method === 'GET' && this.isCacheableRead(request.originalUrl)
+    const skipCache = request.header('cache-control')?.toLowerCase().includes('no-cache') ?? false;
+    const cacheKey = method === 'GET' && !skipCache && this.isCacheableRead(request.originalUrl)
       ? this.cacheKey(request.user.sub, request.originalUrl)
       : undefined;
 

@@ -111,14 +111,14 @@ services:
       dockerfile: infrastructure/monitoring/Dockerfile
     ports:
       - '${PROMETHEUS_PORT:-9090}:9090'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
     volumes:
       - prometheus-data:/prometheus
     command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus']
 
   grafana:
-    image: grafana/grafana:11.5.2
+    build:
+      context: .
+      dockerfile: infrastructure/monitoring/grafana/Dockerfile
     ports:
       - '${GRAFANA_PORT:-3004}:3000'
     environment:

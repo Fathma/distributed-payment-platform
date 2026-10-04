@@ -9,4 +9,4 @@ scrape_configs:
   - job_name: payflow-services
     metrics_path: /metrics
     static_configs:
-      - targets: ['host.docker.internal:3000', 'host.docker.internal:3001', 'host.docker.internal:3002', 'host.docker.internal:3003']
+      - targets: ['api-gateway:3000', 'order-service:3001', 'payment-service:3002', 'payment-worker:3003']

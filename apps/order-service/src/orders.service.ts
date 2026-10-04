@@ -1,11 +1,13 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { randomUUID, createHash } from 'node:crypto';
+import { BadRequestException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
 import { Pool, type PoolClient } from 'pg';
 import { createEventEnvelope, type EventEnvelope, type OrderCreatedData, type PaymentRequestedData, type PaymentResultData } from '@payflow/shared-types';
 import { loadConfig } from '@payflow/config';
 import { log } from '@payflow/logger';
 import type { CreateOrderRequest } from './orders.controller';
+import { assertIdempotencyRequestMatches, hashOrderRequest, normalizeOrder } from './order-policy';
+import { MetricsService, PAYFLOW_METRICS } from '@payflow/metrics';
 
 interface OrderRow {
   id: string;
@@ -29,7 +31,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   private readonly consumer: Consumer = this.kafka.consumer({ groupId: 'order-service-v1' });
   private outboxTimer?: NodeJS.Timeout;
 
-  constructor() { this.pool.on('error', (error) => log('error', 'Idle order database connection failed', { service: 'order-service', error: error.message })); }
+  constructor(@Inject(PAYFLOW_METRICS) private readonly metrics: MetricsService) {
+    this.pool.on('error', (error) => log('error', 'Idle order database connection failed', { service: 'order-service', error: error.message }));
+    this.consumer.on(this.consumer.events.START_BATCH_PROCESS, ({ payload }) => {
+      this.metrics.setConsumerLag('order-service-v1', payload.topic, payload.partition, Number(payload.offsetLag));
+    });
+  }
 
   async onModuleInit() {
     await this.producer.connect();
@@ -39,9 +46,16 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       autoCommit: false,
       eachMessage: async ({ topic, partition, message }) => {
         if (!message.value) return;
-        const event = JSON.parse(message.value.toString()) as EventEnvelope<string, PaymentRequestedData | PaymentResultData>;
-        await this.applyPaymentEvent(event);
-        await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+        const startedAt = process.hrtime.bigint();
+        try {
+          const event = JSON.parse(message.value.toString()) as EventEnvelope<string, PaymentRequestedData | PaymentResultData>;
+          await this.applyPaymentEvent(event);
+          await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+          this.metrics.recordKafkaMessage(topic, 'success', Number(process.hrtime.bigint() - startedAt) / 1e9);
+        } catch (error) {
+          this.metrics.recordKafkaMessage(topic, 'failure', Number(process.hrtime.bigint() - startedAt) / 1e9);
+          throw error;
+        }
       },
     });
     this.outboxTimer = setInterval(() => void this.publishOutbox().catch((error: unknown) => log('error', 'Order outbox publish failed', { service: 'order-service', error: String(error) })), 500);
@@ -49,8 +63,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   async create(input: CreateOrderRequest, idempotencyKey: string, userId: string, requestId?: string, correlationId?: string) {
-    const { items, currency, totalAmount } = this.validate(input);
-    const requestHash = createHash('sha256').update(JSON.stringify({ items, currency })).digest('hex');
+    const { items, currency, totalAmount } = normalizeOrder(input);
+    const requestHash = hashOrderRequest(items, currency);
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -59,7 +73,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         [userId, idempotencyKey],
       );
       if (previous.rowCount) {
-        if (previous.rows[0].request_hash !== requestHash) throw new ConflictException({ code: 'IDEMPOTENCY_KEY_CONFLICT', message: 'Idempotency key was used with a different request' });
+        assertIdempotencyRequestMatches(previous.rows[0].request_hash, requestHash);
         await client.query('COMMIT');
         return previous.rows[0].response;
       }
@@ -106,20 +120,6 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) throw new BadRequestException('limit must be an integer from 1 to 100');
     const result = await this.pool.query<OrderRow>('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2', [userId, parsed]);
     return result.rows.map((row) => this.toOrder(row));
-  }
-
-  private validate(input: CreateOrderRequest) {
-    if (!input || !Array.isArray(input.items) || input.items.length < 1 || input.items.length > 50) throw new BadRequestException('items must contain between 1 and 50 entries');
-    if (typeof input.currency !== 'string' || !/^[A-Za-z]{3}$/.test(input.currency)) throw new BadRequestException('currency must be a three-letter code');
-    const items = input.items.map((item) => {
-      if (!item || typeof item.productId !== 'string' || item.productId.trim().length === 0 || item.productId.length > 100) throw new BadRequestException('each item requires a productId');
-      if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > 10000) throw new BadRequestException('quantity must be an integer from 1 to 10000');
-      if (!Number.isSafeInteger(item.unitAmount) || item.unitAmount < 0) throw new BadRequestException('unitAmount must be a non-negative integer in minor currency units');
-      return { productId: item.productId, quantity: item.quantity, unitAmount: item.unitAmount };
-    });
-    const totalAmount = items.reduce((total, item) => total + item.quantity * item.unitAmount, 0);
-    if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) throw new BadRequestException('order total must be a positive safe integer');
-    return { items, currency: input.currency.toUpperCase(), totalAmount };
   }
 
   private async getOrderRow(client: PoolClient, id: string, userId: string) {

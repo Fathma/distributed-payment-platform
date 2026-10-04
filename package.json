@@ -8,6 +8,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:unit": "npm run build && node --test tests/unit/*.test.cjs",
+    "test:e2e": "node --test tests/e2e/*.test.cjs",
     "start:gateway": "npm run start:dev --workspace @payflow/api-gateway",
     "start:order": "npm run start:dev --workspace @payflow/order-service",
     "start:payment": "npm run start:dev --workspace @payflow/payment-service",

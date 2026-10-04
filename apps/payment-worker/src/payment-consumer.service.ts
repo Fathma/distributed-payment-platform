@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
 import { Pool, type PoolClient } from 'pg';
@@ -6,6 +6,8 @@ import { createEventEnvelope, type EventEnvelope, type PaymentRequestedData, typ
 import { loadConfig } from '@payflow/config';
 import { log } from '@payflow/logger';
 import { MockPaymentProvider, ProviderError } from './mock-payment-provider';
+import { isRetryableProviderFailure, retryDelayMs } from './retry-policy';
+import { MetricsService, PAYFLOW_METRICS } from '@payflow/metrics';
 
 const MAX_ATTEMPTS = Number(process.env.PAYMENT_MAX_ATTEMPTS ?? '4');
 const BASE_RETRY_MS = Number(process.env.PAYMENT_RETRY_BASE_MS ?? '1000');
@@ -22,7 +24,11 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
   private pollTimer?: NodeJS.Timeout;
   private working = false;
 
-  constructor(private readonly provider: MockPaymentProvider) {}
+  constructor(private readonly provider: MockPaymentProvider, @Inject(PAYFLOW_METRICS) private readonly metrics: MetricsService) {
+    this.consumer.on(this.consumer.events.START_BATCH_PROCESS, ({ payload }) => {
+      this.metrics.setConsumerLag('payment-worker-v1', payload.topic, payload.partition, Number(payload.offsetLag));
+    });
+  }
 
   async onModuleInit() {
     await this.producer.connect();
@@ -32,12 +38,19 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
       autoCommit: false,
       eachMessage: async ({ topic, partition, message }) => {
         if (!message.value) return;
-        const event = JSON.parse(message.value.toString()) as EventEnvelope<'payment.requested', PaymentRequestedData>;
-        await this.pool.query(
-          `INSERT INTO worker_jobs (event_id, payment_id, original_event) VALUES ($1, $2, $3::jsonb)
-           ON CONFLICT (event_id) DO NOTHING`, [event.eventId, event.data.paymentId, JSON.stringify(event)],
-        );
-        await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+        const startedAt = process.hrtime.bigint();
+        try {
+          const event = JSON.parse(message.value.toString()) as EventEnvelope<'payment.requested', PaymentRequestedData>;
+          await this.pool.query(
+            `INSERT INTO worker_jobs (event_id, payment_id, original_event) VALUES ($1, $2, $3::jsonb)
+             ON CONFLICT (event_id) DO NOTHING`, [event.eventId, event.data.paymentId, JSON.stringify(event)],
+          );
+          await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+          this.metrics.recordKafkaMessage(topic, 'success', Number(process.hrtime.bigint() - startedAt) / 1e9);
+        } catch (error) {
+          this.metrics.recordKafkaMessage(topic, 'failure', Number(process.hrtime.bigint() - startedAt) / 1e9);
+          throw error;
+        }
       },
     });
     this.pollTimer = setInterval(() => void this.processNext().catch((error: unknown) => log('error', 'Payment job processing failed', { service: 'payment-worker', error: String(error) })), 250);
@@ -74,6 +87,7 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async process(job: JobRow) {
+    const startedAt = process.hrtime.bigint();
     const event = job.original_event;
     const { paymentId, orderId, amount, currency, providerIdempotencyKey, processingGeneration } = event.data;
     const attempt = job.attempt_count + 1;
@@ -82,19 +96,21 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
       const data: PaymentResultData = { paymentId, orderId, providerReference: result.providerReference, attemptCount: attempt, failureCode: null, failureMessage: null, processingGeneration };
       await this.publishResult(event, 'payment.completed', data);
       await this.finish(job.event_id);
+      this.metrics.recordPaymentOutcome('success');
+      this.metrics.recordPaymentProcessing('success', Number(process.hrtime.bigint() - startedAt) / 1e9);
       log('info', 'Mock provider approved payment', { service: 'payment-worker', requestId: event.requestId, correlationId: event.correlationId, paymentId, attempt });
     } catch (error) {
       const code = error instanceof ProviderError ? error.code : 'PROVIDER_ERROR';
       const message = error instanceof Error ? error.message : 'Unknown provider error';
-      const retryable = !(error instanceof ProviderError && error.code === 'PROVIDER_DECLINED');
+      const retryable = isRetryableProviderFailure(code);
       if (retryable && attempt < MAX_ATTEMPTS) {
-        const ceiling = Math.min(MAX_RETRY_MS, BASE_RETRY_MS * (2 ** (attempt - 1)));
-        const delay = Math.floor(ceiling * (0.5 + Math.random() * 0.5));
+        const delay = retryDelayMs(attempt, BASE_RETRY_MS, MAX_RETRY_MS);
         await this.pool.query(
           'UPDATE worker_jobs SET attempt_count = $2, available_at = now() + ($3 * interval \'1 millisecond\'), locked_until = NULL WHERE event_id = $1',
           [job.event_id, attempt, delay],
         );
         log('warn', 'Payment provider attempt will be retried', { service: 'payment-worker', paymentId, attempt, maxAttempts: MAX_ATTEMPTS, retryDelayMs: delay, failureCode: code });
+        this.metrics.recordRetry(code);
         return;
       }
 
@@ -103,6 +119,9 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
       await this.producer.send({ topic: 'payment.dlq', messages: [{ key: paymentId, value: JSON.stringify({ dlqId, originalMessage: event, error: message, attempts: attempt, failedAt: new Date().toISOString(), service: 'payment-worker', correlationId: event.correlationId }) }] });
       await this.publishResult(event, 'payment.failed', data);
       await this.finish(job.event_id);
+      this.metrics.recordPaymentOutcome('failure');
+      this.metrics.recordPaymentProcessing('failure', Number(process.hrtime.bigint() - startedAt) / 1e9);
+      this.metrics.recordDlq('created');
     }
   }
 
@@ -145,6 +164,7 @@ export class PaymentConsumerService implements OnModuleInit, OnModuleDestroy {
       await client.query('INSERT INTO worker_jobs (event_id, payment_id, original_event) VALUES ($1, $2, $3::jsonb)', [replay.eventId, row.payment_id, JSON.stringify(replay)]);
       await client.query('UPDATE worker_dlq SET reprocessed_at = now(), reprocessed_by = $2 WHERE dlq_id = $1', [dlqId, adminId]);
       await client.query('COMMIT');
+      this.metrics.recordDlq('reprocessed');
       return true;
     } catch (error) { await client.query('ROLLBACK').catch(() => undefined); throw error; }
     finally { client.release(); }

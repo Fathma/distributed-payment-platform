@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS provider_outcomes (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS provider_attempts (
+  idempotency_key TEXT PRIMARY KEY,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS worker_dlq (
   dlq_id TEXT PRIMARY KEY,
   event_id TEXT NOT NULL UNIQUE,

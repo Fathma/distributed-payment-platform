@@ -3,6 +3,7 @@ import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
+import { MetricsModule } from '@payflow/metrics';
 
-@Module({ controllers: [HealthController, PaymentsController], providers: [HealthService, PaymentsService] })
+@Module({ imports: [MetricsModule.forRoot('payment-service')], controllers: [HealthController, PaymentsController], providers: [HealthService, PaymentsService] })
 export class AppModule {}

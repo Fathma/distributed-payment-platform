@@ -7,9 +7,11 @@ import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { GatewayProxyController } from './gateway-proxy.controller';
 import { RedisService } from './redis.service';
+import { MetricsModule } from '@payflow/metrics';
 
 @Module({
   controllers: [HealthController, GatewayProxyController, AuthController],
+  imports: [MetricsModule.forRoot('api-gateway')],
   providers: [
     HealthService,
     RedisService,

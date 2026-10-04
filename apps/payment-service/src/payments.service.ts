@@ -1,10 +1,12 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Kafka, type Consumer, type Producer } from 'kafkajs';
 import { Pool, type PoolClient } from 'pg';
 import { createEventEnvelope, type EventEnvelope, type OrderCreatedData, type PaymentRequestedData, type PaymentResultData } from '@payflow/shared-types';
 import { loadConfig } from '@payflow/config';
 import { log } from '@payflow/logger';
+import { MetricsService, PAYFLOW_METRICS } from '@payflow/metrics';
+import { canTransitionPayment, type PaymentLifecycleStatus } from './payment-policy';
 
 interface PaymentRow {
   id: string; order_id: string; user_id: string; amount: string; currency: string; status: string;
@@ -21,7 +23,12 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   private readonly consumer: Consumer = this.kafka.consumer({ groupId: 'payment-service-v1' });
   private outboxTimer?: NodeJS.Timeout;
 
-  constructor() { this.pool.on('error', (error) => log('error', 'Idle payment database connection failed', { service: 'payment-service', error: error.message })); }
+  constructor(@Inject(PAYFLOW_METRICS) private readonly metrics: MetricsService) {
+    this.pool.on('error', (error) => log('error', 'Idle payment database connection failed', { service: 'payment-service', error: error.message }));
+    this.consumer.on(this.consumer.events.START_BATCH_PROCESS, ({ payload }) => {
+      this.metrics.setConsumerLag('payment-service-v1', payload.topic, payload.partition, Number(payload.offsetLag));
+    });
+  }
 
   async onModuleInit() {
     await this.producer.connect();
@@ -31,10 +38,17 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       autoCommit: false,
       eachMessage: async ({ topic, partition, message }) => {
         if (!message.value) return;
-        const event = JSON.parse(message.value.toString()) as EventEnvelope<string, OrderCreatedData | PaymentResultData>;
-        if (topic === 'order.created') await this.createFromOrder(event as EventEnvelope<string, OrderCreatedData>);
-        else await this.recordProviderResult(event as EventEnvelope<string, PaymentResultData>);
-        await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+        const startedAt = process.hrtime.bigint();
+        try {
+          const event = JSON.parse(message.value.toString()) as EventEnvelope<string, OrderCreatedData | PaymentResultData>;
+          if (topic === 'order.created') await this.createFromOrder(event as EventEnvelope<string, OrderCreatedData>);
+          else await this.recordProviderResult(event as EventEnvelope<string, PaymentResultData>);
+          await this.consumer.commitOffsets([{ topic, partition, offset: (BigInt(message.offset) + 1n).toString() }]);
+          this.metrics.recordKafkaMessage(topic, 'success', Number(process.hrtime.bigint() - startedAt) / 1e9);
+        } catch (error) {
+          this.metrics.recordKafkaMessage(topic, 'failure', Number(process.hrtime.bigint() - startedAt) / 1e9);
+          throw error;
+        }
       },
     });
     this.outboxTimer = setInterval(() => void this.publishOutbox().catch((error: unknown) => log('error', 'Payment outbox publish failed', { service: 'payment-service', error: String(error) })), 500);
@@ -93,12 +107,22 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       if (inserted.rowCount) {
         const succeeded = event.eventType === 'payment.completed';
         const status = succeeded ? 'SUCCESS' : 'FAILED';
+        const current = await client.query<{ status: PaymentLifecycleStatus }>(
+          'SELECT status FROM payments WHERE id = $1 AND order_id = $2 FOR UPDATE',
+          [event.data.paymentId, event.data.orderId],
+        );
+        if (!current.rowCount) throw new Error(`Provider result references unknown payment ${event.data.paymentId}`);
+        if (!canTransitionPayment(current.rows[0].status, status)) {
+          log('warn', 'Ignored provider event that would reverse a terminal payment state', { service: 'payment-service', paymentId: event.data.paymentId, currentStatus: current.rows[0].status, incomingStatus: status });
+          await client.query('COMMIT');
+          return;
+        }
         const updated = await client.query(
           `UPDATE payments SET status = $1, provider_reference = $2, attempt_count = $3, updated_at = now()
            WHERE id = $4 AND order_id = $5`,
           [status, event.data.providerReference, event.data.attemptCount, event.data.paymentId, event.data.orderId],
         );
-        if (!updated.rowCount) throw new Error(`Provider result references unknown payment ${event.data.paymentId}`);
+        if (!updated.rowCount) throw new Error(`Payment ${event.data.paymentId} was not updated`);
         const normalized = createEventEnvelope({
           eventType: succeeded ? 'payment.succeeded' : 'payment.declined', producer: 'payment-service',
           aggregateId: event.data.paymentId,

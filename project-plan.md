@@ -42,11 +42,11 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 6: Verify behavior and make it observable
 
-24. **Add tests around core business rules.** Cover payment idempotency, order and payment state transitions, retry decisions, and rate limiting. Add integration tests for each service’s database and broker interactions.
-25. **Add end-to-end scenarios.** Verify a successful payment, a transient provider failure followed by success, permanent failure into the DLQ and admin reprocessing, and duplicate Kafka delivery without a second charge.
-26. **Add structured logs and metrics.** Carry request and correlation IDs through HTTP calls and events. Track HTTP counts, errors and latency; message processing and failures; payment outcomes; retries; DLQ volume; and database and Redis latency.
-27. **Build Prometheus and Grafana views.** Add dashboards for service health, payment outcomes, retry and DLQ activity, request latency, and Kafka consumer lag. Use the dashboards to explain what happened during the end-to-end scenarios.
-28. **Add distributed tracing if useful after the core flow is stable.** Trace a request across the gateway, services, Kafka, and worker using OpenTelemetry.
+24. [x] **Add tests around core business rules.** Cover order validation/idempotency, payment state transitions, retry decisions, rate-limit policy, and JWT role/tampering. E2E assertions also inspect each service’s database and Kafka-driven inbox/outbox records. Run with `npm run test:unit` and `npm run test:e2e`.
+25. [x] **Add end-to-end scenarios.** Added runnable scenarios for payment success, transient retry, permanent failure into the DLQ and admin reprocessing, and duplicate Kafka delivery without a second provider outcome.
+26. [x] **Add structured logs and metrics.** Request/correlation IDs continue through HTTP calls and events. Added per-service Prometheus metrics for HTTP counts/status/latency, Kafka message processing and lag, payment outcomes/duration, retries, DLQ actions, and dependency latency including Redis commands.
+27. [x] **Build Prometheus and Grafana views.** Prometheus scrapes the services over the private Compose network; Grafana provisions a dashboard for scrape health, HTTP rate/errors/latency, payment outcomes, retries/DLQ, consumer lag, and dependency latency.
+28. [x] **Evaluate distributed tracing after the core flow is stable.** Deferred OpenTelemetry: the phase’s metrics and correlated structured logs cover the current local demo; tracing can be added if cross-service diagnosis needs sampling and span detail.
 
 ## Phase 7: Demonstrate operation at scale
 
