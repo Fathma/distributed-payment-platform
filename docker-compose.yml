@@ -143,12 +143,23 @@ services:
       REDIS_URL: redis://redis:6379
       ORDER_SERVICE_URL: http://order-service:3001
       PAYMENT_SERVICE_URL: http://payment-service:3002
+      WORKER_SERVICE_URL: http://payment-worker:3003
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-jwt-secret-before-deploying}
+      DEV_CUSTOMER_ID: ${DEV_CUSTOMER_ID:-usr_customer}
+      DEV_CUSTOMER_EMAIL: ${DEV_CUSTOMER_EMAIL:-customer@example.test}
+      DEV_CUSTOMER_PASSWORD: ${DEV_CUSTOMER_PASSWORD:-customer-dev-password}
+      DEV_ADMIN_ID: ${DEV_ADMIN_ID:-usr_admin}
+      DEV_ADMIN_EMAIL: ${DEV_ADMIN_EMAIL:-admin@example.test}
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:-admin-dev-password}
+      DLQ_ADMIN_TOKEN: ${DLQ_ADMIN_TOKEN:-local-dlq-admin-token}
     depends_on:
       redis:
         condition: service_healthy
       order-service:
         condition: service_healthy
       payment-service:
+        condition: service_healthy
+      payment-worker:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -163,8 +174,6 @@ services:
       dockerfile: infrastructure/docker/app.Dockerfile
       args:
         SERVICE: order-service
-    ports:
-      - '${ORDER_SERVICE_PORT:-3001}:3001'
     environment:
       PORT: 3001
       ORDER_DATABASE_URL: postgresql://order_app:order_dev_password@postgres:5432/order_db
@@ -187,8 +196,6 @@ services:
       dockerfile: infrastructure/docker/app.Dockerfile
       args:
         SERVICE: payment-service
-    ports:
-      - '${PAYMENT_SERVICE_PORT:-3002}:3002'
     environment:
       PORT: 3002
       PAYMENT_DATABASE_URL: postgresql://payment_app:payment_dev_password@postgres:5432/payment_db
@@ -211,8 +218,6 @@ services:
       dockerfile: infrastructure/docker/app.Dockerfile
       args:
         SERVICE: payment-worker
-    ports:
-      - '${PAYMENT_WORKER_PORT:-3003}:3003'
     environment:
       PORT: 3003
       KAFKA_BROKERS: kafka:19092

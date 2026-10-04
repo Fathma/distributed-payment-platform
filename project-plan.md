@@ -35,10 +35,10 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 5: Secure and expose the APIs
 
-20. **Add JWT authentication and authorization.** Support customer and admin roles. Customers can access their own orders and payments; admins can inspect and reprocess DLQ entries.
-21. **Complete gateway routing and validation.** Expose the agreed public APIs through the gateway, validate inputs, hide internal services, and propagate request and correlation IDs.
-22. **Add Redis-backed rate limiting.** Choose and document a token bucket or sliding-window algorithm, with limits appropriate to the caller. Return `429 Too Many Requests` when the limit is exceeded.
-23. **Add Redis caching.** Cache frequently read order or payment data with a defined TTL and invalidation/update behavior. Keep the database as the source of truth.
+20. [x] **Add JWT authentication and authorization.** Support customer and admin roles. Customers access only their own orders and payments; admins inspect and reprocess DLQ entries.
+21. [x] **Complete gateway routing and validation.** Expose the agreed public APIs through the gateway, validate inputs, keep internal services off published Compose ports, and propagate request and correlation IDs.
+22. [x] **Add Redis-backed rate limiting.** Use atomic fixed windows: 10 writes/minute per user, 120 reads/minute per user, and 10 login attempts/minute per IP. Return `429` with `Retry-After`; fail closed with `503` if Redis is unavailable.
+23. [x] **Add Redis caching.** Cache successful user-scoped order and payment GET responses for 10 seconds. Cache failures fall back to services; order creation invalidates that user's order-list entries. Payment status can be stale up to the TTL while asynchronous processing catches up.
 
 ## Phase 6: Verify behavior and make it observable
 

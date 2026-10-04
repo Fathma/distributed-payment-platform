@@ -25,7 +25,7 @@ Each service owns its business logic and data boundaries. Shared packages are fo
 
 ## Getting started
 
-The Phase 3 implementation includes NestJS services, local PostgreSQL/Redis/Kafka/Prometheus/Grafana infrastructure, database migrations, health/readiness endpoints, and an asynchronous order-to-payment flow. See [project-plan.md](project-plan.md) for progress and [plan.md](plan.md) for the full project requirements.
+The project includes NestJS services, local PostgreSQL/Redis/Kafka/Prometheus/Grafana infrastructure, database migrations, health/readiness endpoints, an asynchronous order-to-payment flow, and gateway JWT protection. See [project-plan.md](project-plan.md) for progress and [plan.md](plan.md) for the full project requirements.
 
 ## Local development
 
@@ -35,7 +35,7 @@ Requirements: Node.js 22+, npm 10+, and Docker Compose.
 2. Start local dependencies with `npm run infra:up`.
 3. Build and start the app containers with `npm run apps:up`. Compose applies the initial database migrations before starting Order and Payment Services. Or use `docker compose up -d --build` for the whole stack.
 
-The gateway exposes `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id`, and `GET /api/payments/:id`. Submit an order with an `Idempotency-Key` header; it returns `202` while Kafka processing continues. The mock provider mode can be set in `.env` with `MOCK_PROVIDER_MODE=success`, `timeout`, `server_error`, `rate_limit`, `network_error`, `decline`, or `random`. For the current development-only identity, send `x-user-id: usr_dev` (or another stable test user ID); JWT auth is Phase 5.
+The gateway exposes `POST /api/auth/login`, `POST /api/orders`, `GET /api/orders`, `GET /api/orders/:id`, `GET /api/payments/:id`, and admin-only DLQ operations. Log in with the local credentials in `.env.example`, then use the returned bearer token. Submit an order with an `Idempotency-Key` header; it returns `202` while Kafka processing continues. The mock provider mode can be set in `.env` with `MOCK_PROVIDER_MODE=success`, `timeout`, `server_error`, `rate_limit`, `network_error`, `decline`, or `random`.
 
 Interactive OpenAPI documentation is available at `http://localhost:3000/api/docs`; the generated JSON document is at `http://localhost:3000/api/docs-json`. It describes the public gateway routes, request headers, order body, and common responses.
 

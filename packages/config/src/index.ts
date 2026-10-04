@@ -6,6 +6,7 @@ export interface AppConfig {
   orderDatabaseUrl: string;
   paymentDatabaseUrl: string;
   workerDatabaseUrl: string;
+  jwtSecret: string;
   kafkaBrokers: string[];
 }
 
@@ -21,6 +22,7 @@ export function loadConfig(defaultPort = 3000, env: NodeJS.ProcessEnv = process.
     orderDatabaseUrl: env.ORDER_DATABASE_URL ?? 'postgresql://order_app:order_dev_password@localhost:5432/order_db',
     paymentDatabaseUrl: env.PAYMENT_DATABASE_URL ?? 'postgresql://payment_app:payment_dev_password@localhost:5432/payment_db',
     workerDatabaseUrl: env.WORKER_DATABASE_URL ?? 'postgresql://worker_app:worker_dev_password@localhost:5432/worker_db',
+    jwtSecret: env.JWT_SECRET ?? 'local-only-change-this-jwt-secret-before-deploying',
     kafkaBrokers,
   };
 }

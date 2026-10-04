@@ -1,11 +1,11 @@
 FROM node:22-alpine AS build
 
 WORKDIR /workspace
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY tsconfig.json ./
 COPY apps ./apps
 COPY packages ./packages
-RUN npm ci
+RUN npm install --package-lock=false
 RUN npm run build
 RUN npm prune --omit=dev
 

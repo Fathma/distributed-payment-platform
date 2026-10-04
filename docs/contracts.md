@@ -6,7 +6,7 @@ The interactive OpenAPI UI for public gateway routes is served at `/api/docs`; i
 
 ## Public API
 
-All endpoints are exposed through the API Gateway. The target contract uses `Authorization: Bearer <JWT>`. JWT validation and role enforcement are scheduled for Phase 5; the current Phase 3 gateway accepts `x-user-id` or defaults to `usr_dev` for local walkthroughs. That development identity is not authentication and must not be exposed outside local development. The gateway generates `X-Request-Id` when absent and propagates `X-Correlation-Id`; if absent, it initializes the correlation ID from the request ID. Internal service calls and events preserve both values.
+All public endpoints are exposed through the API Gateway. Except for login and health checks, requests require `Authorization: Bearer <JWT>`. The gateway verifies HS256 tokens, derives user identity only from the verified subject, and forwards `X-User-Id` internally; caller-supplied identity headers are ignored. It generates `X-Request-Id` when absent and propagates `X-Correlation-Id`; if absent, it initializes the correlation ID from the request ID. Internal service calls and events preserve both values. Order, payment, and worker ports are not published by Compose.
 
 ### Authentication
 
@@ -16,7 +16,7 @@ Request: `{ "email": "customer@example.test", "password": "..." }`
 
 Response `200`: `{ "accessToken": "...", "tokenType": "Bearer", "expiresIn": 3600 }`
 
-Initial development authentication may use seeded users; production-grade identity management is outside the project scope. JWT claims include `sub` (user ID), `role` (`CUSTOMER` or `ADMIN`), `iat`, and `exp`.
+Local development authentication uses customer/admin credentials configured by `DEV_CUSTOMER_*` and `DEV_ADMIN_*` environment variables. Replace all defaults, including `JWT_SECRET`, before shared deployment; production identity management is outside the project scope. JWT claims include `sub` (user ID), `role` (`CUSTOMER` or `ADMIN`), `iat`, and `exp`; tokens expire after one hour.
 
 ### Orders
 
@@ -48,23 +48,26 @@ The service computes `totalAmount` from validated line items. Response `202`:
 
 The payment ID may initially be null because payment creation is asynchronous. The order GET response includes it once `payment.requested` is established.
 
-- `GET /api/orders/:id` — customer may read their own order; admin may read any.
-- `GET /api/orders` — customer sees only their own orders; supports `cursor` and bounded `limit`.
-- `POST /api/orders/:id/cancel` — customer may cancel only before processing begins; response contains the current order state.
+- `GET /api/orders/:id` — customer may read their own order.
+- `GET /api/orders` — customer sees only their own orders; supports bounded `limit` (1–100).
 
 Repeating a create request with the same user, key, and request body returns the original order response snapshot. Reusing a key with a different body returns `409 IDEMPOTENCY_KEY_CONFLICT`. This order request starts the event-driven payment creation flow; payment creation is separately constrained to one payment per `orderId`.
 
 ### Payments
 
 - `GET /api/payments/:id` — customer may read a payment associated with their own order; admin may read any.
-- `POST /api/payments/:id/retry` — admin only; requests a controlled retry/reprocess of an eligible failed payment and records the actor/reason. Customers cannot force provider retries directly.
-
 Initial payment creation is event-driven from `order.created`, not a public `POST /payments` endpoint. This keeps ownership and the order-to-payment relationship unambiguous. A later client-initiated payment API would need its own documented authorization and idempotency semantics.
+
+This release exposes payment reads plus the admin DLQ reprocessing path. Payment retry remains available only for a specific pending DLQ entry so the original event and provider identity stay linked.
 
 ### Admin DLQ
 
-- `GET /api/admin/dlq` — admin only; paginated list of dead-letter records with safe error summaries.
-- `GET /admin/dlq` and `POST /admin/dlq/:id/reprocess` on the worker's internal port — protected by the configured `X-Admin-Token`; `X-Admin-Id` records the operator. Reprocessing requeues the original logical payment request and preserves the original payment/provider idempotency identity. Gateway JWT role enforcement is Phase 5.
+- `GET /api/admin/dlq` — admin only; list of up to 100 pending dead-letter records with safe error summaries.
+- `POST /api/admin/dlq/:id/reprocess` — admin only; requeues the original logical payment request and preserves the original payment/provider idempotency identity. The gateway forwards a service token to the private worker and records the JWT subject as `X-Admin-Id`.
+
+### Rate limits and caching
+
+The gateway enforces Redis fixed-window limits: 10 writes per minute per authenticated user, 120 reads per minute per authenticated user, and 10 login requests per minute per IP. It returns `429` with `Retry-After` when a limit is exceeded and fails closed with `503` when Redis cannot enforce limits. Successful order/payment GET responses are cached per user and URL for 10 seconds. Redis cache errors fall back to the service/database; creating an order invalidates that user's cached order lists. Asynchronous payment status reads may be stale for up to the cache TTL.
 
 ### Errors
 

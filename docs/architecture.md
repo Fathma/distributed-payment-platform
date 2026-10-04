@@ -32,14 +32,14 @@ flowchart LR
 
 | Component | Owns | Responsibilities |
 | --- | --- | --- |
-| API Gateway | Public HTTP surface; no business data | JWT authentication and role checks, validation, rate limiting, request/correlation IDs, routing, structured access logs |
+| API Gateway | Public HTTP surface; no business data | HS256 JWT authentication and role checks, DTO validation, Redis rate limiting and read cache, request/correlation IDs, public routing |
 | Order Service | Orders and order outbox | Create/list/get/cancel orders; enforce order state transitions; publish `order.created`; consume payment outcomes and update order state |
 | Payment Service | Payments, client idempotency records, payment outbox | Create one payment per order, return payment state, enforce payment transitions, publish `payment.requested`, consume worker results |
 | Payment Worker | Operational job and DLQ records (not payment business state) | Persist requests before acknowledging Kafka, call provider with a stable idempotency key, retry transient failures, route exhausted work to DLQ, publish results |
 | Mock Provider | Durable simulated provider outcomes in worker PostgreSQL | Simulate success, timeout, 5xx, rate-limit, and network failures; return the same successful outcome for the same provider idempotency key across worker restarts |
-| Redis | Disposable cache and rate-limit state | Gateway rate limiting and read-through cache. Cache loss is recoverable; database remains authoritative. |
+| Redis | Disposable cache and rate-limit state | Atomic fixed-window rate limits and ten-second user-scoped read cache. Cache loss is recoverable; database remains authoritative. |
 
-Order and payment data use separate PostgreSQL schemas/databases and credentials. A service must not query another service's tables; information crosses service boundaries through HTTP APIs or Kafka events. The worker has no direct access to payment tables.
+Order and payment data use separate PostgreSQL schemas/databases and credentials. Compose publishes only the API Gateway; order, payment, and worker services stay on the internal network. A service must not query another service's tables; information crosses service boundaries through HTTP APIs or Kafka events. The worker has no direct access to payment tables.
 
 ## Order and payment lifecycle
 
@@ -66,8 +66,8 @@ The provider timeout case is inherently ambiguous: the provider may have charged
 ## Shared infrastructure decisions
 
 - **Kafka:** versioned event envelopes, durable topics, consumer groups, manual offset commits, keyed partitions, bounded retries, and a DLQ. Retries use exponential backoff plus jitter; retry topics/scheduling must not block unrelated partitions while waiting.
-- **Redis:** token-bucket or sliding-window rate-limit state with TTL; read-through cache with bounded TTL and safe database fallback. Rate-limit outage policy is fail closed for protected write endpoints, while cache outage falls back to PostgreSQL.
-- **Authentication:** JWT identifies `userId` and `role`; the gateway checks authentication and role, while Order/Payment Services enforce ownership using trusted identity forwarded over a protected internal boundary.
+- **Redis:** an atomic fixed-window limiter allows 10 writes/minute/user, 120 reads/minute/user, and 10 login attempts/minute/IP. Rate-limit outage fails closed with `503`; cache outage falls back to the owning service/database. User-scoped order and payment GET responses expire after 10 seconds; order creation invalidates cached order lists.
+- **Authentication:** the gateway issues one-hour HS256 JWTs for environment-configured local customer/admin accounts, checks roles, and derives identity only from verified claims. Internal service ports are not published; the gateway forwards the verified user ID over the Compose network.
 - **Observability:** structured logs carry `requestId`, `correlationId`, `service`, timestamp, level, and entity IDs. Prometheus metrics cover HTTP latency/errors, Kafka processing/failures/lag, payment outcomes, retries, DLQ depth, and dependency latency. OpenTelemetry tracing follows after the core flow.
 - **Health:** `/health` reports process liveness; `/ready` reports whether the dependencies required to serve that service are usable.
 
@@ -86,7 +86,7 @@ The provider timeout case is inherently ambiguous: the provider may have charged
 | Worker stops | Kafka retains unacknowledged requests; a replacement worker resumes consumption. |
 | Provider transient failure | Retry with bounded exponential backoff and jitter; route exhausted events to DLQ. |
 | PostgreSQL unavailable | Do not acknowledge Kafka input before its durable job/inbox write; affected HTTP operations return an error, readiness fails, and processing resumes when PostgreSQL returns. |
-| Redis unavailable | Gateway readiness fails. No current order/payment operation depends on Redis; when rate limiting is added, protected writes fail closed, and cache reads fall back to PostgreSQL. |
+| Redis unavailable | Gateway readiness fails; API traffic also fails closed because the rate limiter cannot enforce its policy. Cache reads alone fall back to the owning service/database. |
 | Duplicate Kafka event | Inbox/unique constraints and provider idempotency prevent repeated state effects and charges. |
 | Ambiguous provider timeout | Repeat only with the same provider idempotency key; otherwise require reconciliation rather than issuing a fresh charge. |
 
