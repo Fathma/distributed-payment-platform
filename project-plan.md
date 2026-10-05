@@ -50,9 +50,9 @@ The repository is currently at the scaffold stage, so this plan starts with agre
 
 ## Phase 7: Demonstrate operation at scale
 
-29. **Verify horizontal scaling.** Run multiple Order Service instances and Payment Workers. Confirm that gateway traffic is distributed and Kafka partitions are shared across workers in the consumer group.
-30. **Run controlled load tests with k6.** Measure normal, high-load, and spike scenarios. Record p50, p95, and p99 latency, throughput, error rate, resource use, database performance, and Kafka lag. Report measured results only.
-31. **Exercise failure scenarios.** Stop workers, make the provider unavailable, interrupt database and Redis access, and redeliver duplicate messages. Record observed behavior and confirm recovery matches the documented design.
+29. **Verify horizontal scaling.** Added `npm run scale:check` to start two Order Service instances and two Payment Workers, report running replicas and Kafka group assignments, and restore the original replica counts. Runtime verification is pending a live Docker stack.
+30. **Run controlled load tests with k6.** Added normal, high, and spike profiles in `tests/load/payment-flow.js`; the test drives authenticated orders through terminal payment status while staying within per-user write limits. Runtime measurements (latency percentiles, throughput, failures, resources, DB and Kafka metrics) are pending a live Docker stack and k6.
+31. **Exercise failure scenarios.** Added local worker/provider, PostgreSQL, Redis, Kafka, and duplicate-delivery drills in `tests/scale/failure-drills.md`. Runtime observations and recovery verification are pending a live Docker stack.
 
 ## Phase 8: Prepare the project for review
 

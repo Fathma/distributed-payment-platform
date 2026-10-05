@@ -45,6 +45,12 @@ Run `npm run test:unit` for business-rule tests. With Docker Compose running and
 
 Prometheus scrapes `/metrics` on all four services over the private Compose network. The gateway metrics endpoint is also reachable at `http://localhost:3000/metrics`. Open Grafana at `http://localhost:3004` to view the provisioned **PayFlow Overview** dashboard. It charts scrape health, HTTP rate/errors/latency, payment outcomes, retries and DLQ actions, Kafka consumer lag, and dependency latency. Structured JSON logs include request and correlation IDs; OpenTelemetry tracing is deferred until span-level diagnosis is useful.
 
+## Scaling and load exercises
+
+Install [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) and start the full Compose stack. Set `JWT_SECRET` in the shell to the same value used by the gateway (the default from `.env.example` is used if omitted). Run `npm run load:normal`, `npm run load:high`, or `npm run load:spike`; each profile submits authenticated orders with unique test users and waits for payment completion. Per-user pacing stays below the gateway's write limit. The test uses the mock provider, so use a local stack and expect test records in the databases.
+
+Run `npm run scale:check` to briefly scale Order Service and Payment Worker to two replicas, inspect their Kafka group assignments, and restore the prior replica counts. See [failure drills](tests/scale/failure-drills.md) for worker/provider and dependency outages, and run `bash tests/scale/capture-runtime.sh` after a load profile to save Docker resource use, PostgreSQL counters, HTTP percentiles/error rates, payment outcomes, retries, DLQ activity, and consumer lag. Generated snapshots are ignored under `tests/results/`. Phase 7 performance results remain unreported until these exercises run on the target machine.
+
 To run apps directly on the host, first run `npm install`, start infrastructure, apply migrations with `npm run db:migrate --workspace @payflow/order-service` and `npm run db:migrate --workspace @payflow/payment-service`, then use `npm run start:gateway`, `npm run start:order`, `npm run start:payment`, and `npm run start:worker`. Stop only the app containers with `npm run apps:down`; stop the whole stack with `npm run infra:down`.
 
 ## Technology direction

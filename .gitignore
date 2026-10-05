@@ -6,6 +6,7 @@ coverage/
 .env.*
 !.env.example
 *.log
+/tests/results/
 .DS_Store
 
 package-lock.json
